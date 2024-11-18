@@ -223,8 +223,12 @@ class Ising2D:
 
 class TreeSampler:
     '''implement tree sampler to sample from joint distribution of a tree'''
-    def __init__(self, node_potentials, edge_potentials):
-        self.tree_graph = GraphModel(node_potentials,edge_potentials)
+    def __init__(self, tree:GraphModel, X = [-1,1]):
+        self.tree_graph = tree
+        self.root_idx = -1
+        self.messages= None
+        self.X = X # binary values x could take
+ 
 
     def compute_message(self,i, j, messages):
 
@@ -266,7 +270,7 @@ class TreeSampler:
             # If i has other neighbors (let's call them k), recursively compute messages from k to i
             product_messages = np.ones(2)
             for neighbor in neighbors_i:
-                message_ki = self.compute_message(neighbor, i, messages, tree_graph)
+                message_ki = self.compute_message(neighbor, i, messages)
                 product_messages *= message_ki
 
                 if e_ij == (i, j):
@@ -280,34 +284,90 @@ class TreeSampler:
         return message_ij
 
 
-    def sum_product_partition(self):
+    def sum_product(self):
         tree_graph = self.tree_graph
-        messages = {}
+        self.messages = {}
         nodes = tree_graph.get_V()
-        root = nodes[-1]
+        root = nodes[self.root_idx]
 
         # bottom up
         for neighbor in tree_graph.get_neighbors(root):
-            self.compute_message(neighbor, root, messages, tree_graph)
+            self.compute_message(neighbor, root, self.messages)
 
         # top down
         def top_down_message(parent, node, messages):
             # Compute message from parent to child (node)
-            self.compute_message(parent, node, messages, tree_graph)
+            self.compute_message(parent, node, self.messages)
 
             # Recursively propagate messages to children of 'node'
             for neighbor in tree_graph.get_neighbors(node):
                 if neighbor != parent:
-                    top_down_message(node, neighbor, messages)
+                    top_down_message(node, neighbor, self.messages)
 
         for neighbor in tree_graph.get_neighbors(root):
-            top_down_message(root, neighbor, messages)
+            top_down_message(root, neighbor, self.messages)
 
+    def sample(self):
+        '''
+        perform joint sampling of node values from the tree's joint distribution
+
+        Returns:
+            dict: A dictionary mapping each node index to its sampled state
+        '''
+        tree_graph = self.tree_graph
+        if self.messages is None:
+            self.sum_product()
+        
+        sampled_values = {}
+        root = tree_graph.get_V()[self.root_idx]
+
+        # root marginal
         phi_root = tree_graph.node_potentials[root]
-        Z = 0
-        for x_root in [0, 1]:
-            root_contribution = phi_root[x_root]
-            for neighbor in tree_graph.get_neighbors(root):
-                root_contribution *= messages[(neighbor, root)][x_root]
-            Z += root_contribution
-        return Z, messages
+        marginal_root = phi_root.copy()
+        for neighbor in tree_graph.get_neighbors(root):
+            marginal_root *= self.messages[(neighbor,root)]
+        marginal_root = marginal_root / marginal_root.sum()
+        
+        # sample root
+        x_root = np.random.choice(self.X,p=marginal_root)
+        sampled_values[root] = x_root
+
+        def sample_children(parent, node):
+            # Compute conditional distribution p(x_node | x_parent)
+            phi_node = self.tree_graph.node_potentials[node]
+
+            # Messages from other neighbors
+            product_messages = np.ones(2)
+            for neighbor in self.tree_graph.get_neighbors(node):
+                if neighbor != parent:
+                    product_messages *= self.messages[(neighbor, node)]
+
+            # Fetch edge potential between parent and node and handle orientation
+            if (parent, node) in self.tree_graph.edge_potentials:
+                psi = self.tree_graph.edge_potentials[(parent, node)]
+            elif (node, parent) in self.tree_graph.edge_potentials:
+                psi = self.tree_graph.edge_potentials[(node, parent)].T
+            else:
+                raise ValueError(f"Edge potential not found between nodes {parent} and {node}")
+
+            x_parent = sampled_values[parent]
+            x_parent_idx = self.X.index(x_parent)
+            # Compute unnormalized conditional distribution
+            cond_prob = np.zeros(2)
+            for idx, x_node in enumerate(self.X):
+                edge_phi = psi[x_parent_idx, idx]
+                cond_prob[idx] = phi_node[idx] * edge_phi * product_messages[idx]
+            # Normalize
+            cond_prob = cond_prob / cond_prob.sum()
+            # Sample x_node directly
+            x_node = np.random.choice(self.X, p=cond_prob)
+            sampled_values[node] = x_node
+            # Recursively sample children of node
+            for neighbor in self.tree_graph.get_neighbors(node):
+                if neighbor != parent:
+                    sample_children(node, neighbor)
+        
+        for neighbor in self.tree_graph.get_neighbors(root):
+            sample_children(root,neighbor)
+        return sampled_values
+
