@@ -22,6 +22,7 @@ class GraphModel:
         self.edge_potentials = edge_potentials.copy()
         self.nodes = self.get_V()
         self.edges = self.get_E()
+        self.neighbors = self.compute_neighbors()
 
     def get_V(self):
         return list(self.node_potentials.keys()).copy()
@@ -29,20 +30,22 @@ class GraphModel:
     def get_E(self):
         return list(self.edge_potentials.keys()).copy()
 
-    def get_neighbors(self, i):
+    def compute_neighbors(self):
         """
-        return the indexes of node i' neighbors
+        Precompute the neighbors for each node and store in a dictionary.
         """
-        assert i in self.nodes
-        neighbors = []
+        neighbors = {node: [] for node in self.nodes}
         for edge in self.edges:
             node1, node2 = edge
-            if node1 == i and node2 not in neighbors:
-                neighbors.append(node2)
-            elif node2 == i and node1 not in neighbors:
-                neighbors.append(node1)
-
+            neighbors[node1].append(node2)
+            neighbors[node2].append(node1)
         return neighbors
+
+    def get_neighbors(self, i):
+        """
+        Return the neighbors of node i.
+        """
+        return self.neighbors[i]
 
 
 class Ising2D:
