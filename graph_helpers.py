@@ -1,5 +1,9 @@
 import numpy as np
-from graphviz import Graph
+from scipy.special import logsumexp
+
+import matplotlib.pyplot as plt
+
+
 class GraphModel:
     """
     Simple class for undirected graphical models over binary variables.
@@ -39,67 +43,36 @@ class GraphModel:
                 neighbors.append(node1)
 
         return neighbors
-    
-    def visualize(self, output_file=None, show_potentials=False):
-        """
-        Visualize the graph using Graphviz.
 
-        Args:
-            output_file (str): If provided, saves the visualization to a file (e.g., "graph.png").
-            show_potentials (bool): Whether to annotate nodes and edges with their potentials.
-        """
-        dot = Graph(format='png', engine='dot')
-        dot.attr('node', shape='circle')
 
-        # Add nodes
-        for node in self.get_V():
-            if show_potentials:
-                potential = self.node_potentials[node]
-                label = f"{node}\n{potential}"
-            else:
-                label = f"{node}"
-            dot.node(str(node), label=label)
-
-        # Add edges
-        for edge in self.get_E():
-            if show_potentials:
-                potential = self.edge_potentials[edge]
-                label = f"{potential}"
-            else:
-                label = ""
-            dot.edge(str(edge[0]), str(edge[1]), label=label)
-
-        # Render the graph
-        if output_file:
-            dot.render(output_file, view=True)  # Saves and optionally opens the file
-        else:
-            dot.view()  # Only opens the visualization
-        
 class Ising2D:
-    '''generate a simple 2D Ising Graph according to P_xv = 1/Z exp{sum{theta*x_i*x_j}}'''
-    def __init__(self, N, theta,X =[-1,1]):
-        '''
+    """generate a simple 2D Ising Graph according to P_xv = 1/Z exp{sum{theta*x_i*x_j}}"""
+
+    def __init__(self, N, theta, X=[-1, 1]):
+        """
         N: size of ising graph (N*N nodes)
         theta: coupling parameter
         X: an array of possible x values
-        '''
+        """
         self.N = N
         self.theta = theta
         self.X = X
-        self.Ising = self.generate_2Dising(N,theta,X)
-    
+        self.Ising = self.generate_2Dising(N, theta, X)
+
     def generate_2Dising(self, N, theta, X):
-        '''
+        """
         Generate a 2D Ising model graph using the GraphModel class.
-        '''
+        """
         node_potentials = {}
         edge_potentials = {}
-        
+
         # Define node potentials (assume uniform distribution over X for simplicity)
         for i in range(N):
             for j in range(N):
                 node_index = (i, j)  # Node represented by its 2D coordinates
-                node_potentials[node_index] = np.array([1, 1])  # Uniform potential for each node
+                node_potentials[node_index] = np.array(
+                    [1, 1]
+                )  # Uniform potential for each node
 
         # Define edge potentials based on the Ising model
         for i in range(N):
@@ -111,31 +84,68 @@ class Ising2D:
                     neighbor_index = (i, j + 1)
                     x0 = self.X[0]
                     x1 = self.X[1]
-                    edge_potentials[(node_index, neighbor_index)] = np.array([
-                        [np.exp(theta*x0*x0), np.exp(theta*x0*x1)],
-                        [np.exp(theta*x1*x0), np.exp(theta*x1*x1)]
-                    ])
+                    edge_potentials[(node_index, neighbor_index)] = np.array(
+                        [
+                            [np.exp(theta * x0 * x0), np.exp(theta * x0 * x1)],
+                            [np.exp(theta * x1 * x0), np.exp(theta * x1 * x1)],
+                        ]
+                    )
 
                 if i + 1 < N:  # Vertical neighbor
                     neighbor_index = (i + 1, j)
                     x0 = self.X[0]
                     x1 = self.X[1]
-                    edge_potentials[(node_index, neighbor_index)] = np.array([
-                        [np.exp(theta*x0*x0), np.exp(theta*x0*x1)],
-                        [np.exp(theta*x1*x0), np.exp(theta*x1*x1)]
-                    ])
+                    edge_potentials[(node_index, neighbor_index)] = np.array(
+                        [
+                            [np.exp(theta * x0 * x0), np.exp(theta * x0 * x1)],
+                            [np.exp(theta * x1 * x0), np.exp(theta * x1 * x1)],
+                        ]
+                    )
 
         # Create a GraphModel instance with node and edge potentials
         return GraphModel(node_potentials, edge_potentials)
-    
+
+    def visualize(self, sample_state, ax=None, iteration=None):
+        """
+        Visualize the Ising model grid based on the sample_state.
+
+        input:
+            sample_state (dict): A dictionary mapping node indices to their spin values.
+            ax (matplotlib.axes.Axes): The axis to plot on. If None, creates a new figure.
+            iteration (int): Iteration number for the title.
+        """
+        # Initialize a 2D numpy array to hold the spin values
+        grid = np.zeros((self.N, self.N))
+
+        for i in range(self.N):
+            for j in range(self.N):
+                node_index = (i, j)
+                spin_value = sample_state.get(
+                    node_index, self.X[0]
+                )  # Default to X[0] if not specified
+                # Map the spin value to 0 or 1 for visualization
+                grid[i, j] = self.X.index(spin_value)
+
+        # Create a colormap: 0 -> black, 1 -> white
+        cmap = plt.cm.gray
+        if ax is None:
+            plt.figure(figsize=(6, 6))
+            ax = plt.gca()
+        im = ax.imshow(grid, cmap=cmap, interpolation="nearest", origin="upper")
+        ax.axis("off")
+        if iteration is not None:
+            ax.set_title(f"Iteration {iteration}")
+        else:
+            ax.set_title("Ising Model Visualization")
+
     def split_and_calculate_trees(self):
-        '''
+        """
         Split the Ising graph into disjoint sets A and B, and calculate the conditional potentials
         for P(A | B) and P(B | A).
         Returns:
             tree_A: GraphModel object representing P(A | B)
             tree_B: GraphModel object representing P(B | A)
-        '''
+        """
         # Step 1: Initialize sets and edge lists
         nodes_A = set()
         nodes_B = set()
@@ -147,9 +157,13 @@ class Ising2D:
         for i in range(self.N):
             for j in range(self.N):
                 node_index = (i, j)
-                if i == 0 or (j % 2 == 0 and i <self.N-1):  # First row or odd column -> Tree A
+                if i == 0 or (
+                    j % 2 == 0 and i < self.N - 1
+                ):  # First row or odd column -> Tree A
                     nodes_A.add(node_index)
-                if i == self.N - 1 or (j % 2 == 1 and i>0):  # Last row or even column -> Tree B
+                if i == self.N - 1 or (
+                    j % 2 == 1 and i > 0
+                ):  # Last row or even column -> Tree B
                     nodes_B.add(node_index)
 
         # Step 1.2: Split edges into AA, BB, and AB
@@ -176,7 +190,7 @@ class Ising2D:
                         edges_BB.append((node_index, neighbor_index))
                     else:
                         edges_AB.append((node_index, neighbor_index))
-        
+
         # Calculate P(A | B)
         tree_A_node_potentials, tree_A_edge_potentials = self.calculate_tree_potentials(
             nodes_A, nodes_B, edges_AA, self.theta
@@ -194,7 +208,7 @@ class Ising2D:
         return tree_A, tree_B
 
     # Step 2: Calculate conditional node and edge potentials
-    def calculate_tree_potentials(self,tree_nodes, other_tree_nodes, edges, theta):
+    def calculate_tree_potentials(self, tree_nodes, other_tree_nodes, edges, theta):
         node_potentials = {}
         edge_potentials = {}
 
@@ -207,7 +221,7 @@ class Ising2D:
                 for neighbor in neighbors:
                     if neighbor in other_tree_nodes:
                         for x_j in self.X:
-                            phi += theta*x_i*x_j
+                            phi += theta * x_i * x_j
                 potential.append(np.exp(phi))
             node_potentials[node] = np.array(potential)
 
@@ -217,29 +231,20 @@ class Ising2D:
 
         return node_potentials, edge_potentials
 
-    
-
-
 
 class TreeSampler:
-    '''implement tree sampler to sample from joint distribution of a tree'''
-    def __init__(self, tree:GraphModel, X = [-1,1]):
+    """Implement tree sampler to sample from joint distribution of a tree."""
+
+    def __init__(self, tree: GraphModel, X=[-1, 1]):
         self.tree_graph = tree
-        self.root_idx = -1
-        self.messages= None
-        self.X = X # binary values x could take
- 
+        self.root_idx = -1  # Should be set before sampling
+        self.messages = None
+        self.X = X  # Binary values x could take
 
-    def compute_message(self,i, j, messages):
-
-        '''
-        Takes in a GraphModel object representing a tree graph and computes the
-        corresponding partition function. 
-        return (Z, messages) where
-        Z: float equal to the partition function (sum over all nodes)
-        messages: map from (i,j) to message data structure  
-        representing message passed from node i to node j.
-        '''
+    def compute_message(self, i, j, messages):
+        """
+        Computes the log-space message from node i to node j.
+        """
         tree_graph = self.tree_graph
 
         # Check if the message (i, j) is already computed
@@ -248,41 +253,62 @@ class TreeSampler:
 
         # Node potential for node i
         phi_i = tree_graph.node_potentials[i]
+        log_phi_i = np.log(phi_i)
 
-        # Initialization
-        message_ij = np.ones(2)
-
-        # Get the neighbors of node i
+        # Get the neighbors of node i excluding j
         neighbors_i = [
             neighbor for neighbor in tree_graph.get_neighbors(i) if neighbor != j
         ]
 
+        # Edge potential between i and j
         e_ij = (i, j) if (i, j) in tree_graph.edge_potentials else (j, i)
         psi_ij = tree_graph.edge_potentials[e_ij]
+        log_psi_ij = np.log(psi_ij)
 
         if not neighbors_i:
-            message_ij = phi_i * psi_ij
+            # Leaf node
             if e_ij == (i, j):
-                message_ij = np.matmul(phi_i, psi_ij)
+                # Compute log-message
+                log_message_ij = np.zeros(len(self.X))
+                for x_j in range(len(self.X)):
+                    log_message_ij[x_j] = logsumexp(log_phi_i + log_psi_ij[:, x_j])
             else:
-                message_ij = np.matmul(phi_i, psi_ij.T)
+                log_message_ij = np.zeros(len(self.X))
+                for x_j in range(len(self.X)):
+                    log_message_ij[x_j] = logsumexp(log_phi_i + log_psi_ij.T[:, x_j])
         else:
-            # If i has other neighbors (let's call them k), recursively compute messages from k to i
-            product_messages = np.ones(2)
+            # Non-leaf node
+            # Compute the sum of log-messages from neighbors
+            log_product_messages = np.zeros(len(self.X))
             for neighbor in neighbors_i:
-                message_ki = self.compute_message(neighbor, i, messages)
-                product_messages *= message_ki
+                log_message_ki = self.compute_message(neighbor, i, messages)
+                log_product_messages += log_message_ki
 
-                if e_ij == (i, j):
-                    message_ij = np.matmul(product_messages * phi_i, psi_ij)
-                else:
-                    message_ij = np.matmul(product_messages * phi_i, psi_ij.T)
+            log_phi_i_message = log_phi_i + log_product_messages
+
+            if e_ij == (i, j):
+                log_message_ij = np.zeros(len(self.X))
+                for x_j in range(len(self.X)):
+                    log_sums = []
+                    for x_i in range(len(self.X)):
+                        log_sums.append(log_phi_i_message[x_i] + log_psi_ij[x_i, x_j])
+                    log_message_ij[x_j] = logsumexp(log_sums)
+            else:
+                log_message_ij = np.zeros(len(self.X))
+                for x_j in range(len(self.X)):
+                    log_sums = []
+                    for x_i in range(len(self.X)):
+                        log_sums.append(log_phi_i_message[x_i] + log_psi_ij.T[x_i, x_j])
+                    log_message_ij[x_j] = logsumexp(log_sums)
+
+        # Normalize log-message to prevent numerical issues
+        max_log_msg = np.max(log_message_ij)
+        log_message_ij -= max_log_msg
 
         # Store the computed message (i, j)
-        messages[(i, j)] = message_ij
+        messages[(i, j)] = log_message_ij
 
-        return message_ij
-
+        return log_message_ij
 
     def sum_product(self):
         tree_graph = self.tree_graph
@@ -290,57 +316,52 @@ class TreeSampler:
         nodes = tree_graph.get_V()
         root = nodes[self.root_idx]
 
-        # bottom up
+        # Bottom-up pass: compute messages from leaves to root
         for neighbor in tree_graph.get_neighbors(root):
             self.compute_message(neighbor, root, self.messages)
 
-        # top down
-        def top_down_message(parent, node, messages):
-            # Compute message from parent to child (node)
-            self.compute_message(parent, node, self.messages)
-
-            # Recursively propagate messages to children of 'node'
-            for neighbor in tree_graph.get_neighbors(node):
-                if neighbor != parent:
-                    top_down_message(node, neighbor, self.messages)
-
-        for neighbor in tree_graph.get_neighbors(root):
-            top_down_message(root, neighbor, self.messages)
+        # Top-down pass: not necessary for sampling as we use the messages computed
 
     def sample(self):
-        '''
-        perform joint sampling of node values from the tree's joint distribution
+        """
+        Perform joint sampling of node values from the tree's joint distribution.
 
         Returns:
             dict: A dictionary mapping each node index to its sampled state
-        '''
+        """
         tree_graph = self.tree_graph
         if self.messages is None:
             self.sum_product()
-        
+
         sampled_values = {}
         root = tree_graph.get_V()[self.root_idx]
 
-        # root marginal
+        # Root marginal in log-space
         phi_root = tree_graph.node_potentials[root]
-        marginal_root = phi_root.copy()
+        log_phi_root = np.log(phi_root)
+        log_marginal_root = log_phi_root.copy()
         for neighbor in tree_graph.get_neighbors(root):
-            marginal_root *= self.messages[(neighbor,root)]
-        marginal_root = marginal_root / marginal_root.sum()
-        
-        # sample root
-        x_root = np.random.choice(self.X,p=marginal_root)
+            log_message = self.messages[(neighbor, root)]
+            log_marginal_root += log_message
+
+        # Convert log-marginal to probabilities
+        log_marginal_root -= logsumexp(log_marginal_root)
+        marginal_root = np.exp(log_marginal_root)
+
+        # Sample root
+        x_root = np.random.choice(self.X, p=marginal_root)
         sampled_values[root] = x_root
 
         def sample_children(parent, node):
-            # Compute conditional distribution p(x_node | x_parent)
+            # Compute conditional distribution p(x_node | x_parent) in log-space
             phi_node = self.tree_graph.node_potentials[node]
+            log_phi_node = np.log(phi_node)
 
             # Messages from other neighbors
-            product_messages = np.ones(2)
+            log_product_messages = np.zeros(len(self.X))
             for neighbor in self.tree_graph.get_neighbors(node):
                 if neighbor != parent:
-                    product_messages *= self.messages[(neighbor, node)]
+                    log_product_messages += self.messages[(neighbor, node)]
 
             # Fetch edge potential between parent and node and handle orientation
             if (parent, node) in self.tree_graph.edge_potentials:
@@ -348,17 +369,24 @@ class TreeSampler:
             elif (node, parent) in self.tree_graph.edge_potentials:
                 psi = self.tree_graph.edge_potentials[(node, parent)].T
             else:
-                raise ValueError(f"Edge potential not found between nodes {parent} and {node}")
+                raise ValueError(
+                    f"Edge potential not found between nodes {parent} and {node}"
+                )
+            log_psi = np.log(psi)
 
             x_parent = sampled_values[parent]
             x_parent_idx = self.X.index(x_parent)
-            # Compute unnormalized conditional distribution
-            cond_prob = np.zeros(2)
+            # Compute unnormalized log-conditional distribution
+            log_cond_prob = np.zeros(len(self.X))
             for idx, x_node in enumerate(self.X):
-                edge_phi = psi[x_parent_idx, idx]
-                cond_prob[idx] = phi_node[idx] * edge_phi * product_messages[idx]
+                log_edge_phi = log_psi[x_parent_idx, idx]
+                log_cond_prob[idx] = (
+                    log_phi_node[idx] + log_edge_phi + log_product_messages[idx]
+                )
+
             # Normalize
-            cond_prob = cond_prob / cond_prob.sum()
+            log_cond_prob -= logsumexp(log_cond_prob)
+            cond_prob = np.exp(log_cond_prob)
             # Sample x_node directly
             x_node = np.random.choice(self.X, p=cond_prob)
             sampled_values[node] = x_node
@@ -366,8 +394,7 @@ class TreeSampler:
             for neighbor in self.tree_graph.get_neighbors(node):
                 if neighbor != parent:
                     sample_children(node, neighbor)
-        
-        for neighbor in self.tree_graph.get_neighbors(root):
-            sample_children(root,neighbor)
-        return sampled_values
 
+        for neighbor in tree_graph.get_neighbors(root):
+            sample_children(root, neighbor)
+        return sampled_values
